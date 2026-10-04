@@ -7,6 +7,26 @@ defmodule Mutare.Phoenix.Ecto.Test.Probe do
   def declared, do: Process.get(@anchor_key)
 end
 
+defmodule Mutare.Phoenix.Ecto.Test.Owners do
+  @moduledoc false
+  alias Ecto.Adapters.SQL.Sandbox, as: SQLSandbox
+  alias Mutare.Phoenix.Ecto.Test.Repo
+  alias Phoenix.Ecto.SQL.Sandbox, as: SandboxPlug
+
+  import ExUnit.Callbacks, only: [on_exit: 1]
+
+  # A sandbox owner of the shape a browser-driven test starts, stopped when the test exits.
+  def owner do
+    owner = Task.async(fn -> SQLSandbox.start_owner!(Repo) end) |> Task.await()
+    on_exit(fn -> SQLSandbox.stop_owner(owner) end)
+    owner
+  end
+
+  # The metadata naming `owner`, as the test's browser sends it.
+  def metadata(owner),
+    do: Repo |> SandboxPlug.metadata_for(owner) |> SandboxPlug.encode_metadata()
+end
+
 defmodule Mutare.Phoenix.Ecto.Test.ProbePlug do
   @moduledoc false
   # The route a request reaches: replies with the serving process, what it had declared
@@ -36,11 +56,18 @@ defmodule Mutare.Phoenix.Ecto.Test.ParentLive do
 
   alias Mutare.Phoenix.Ecto.Test.Probe
 
-  def mount(_params, _session, socket), do: {:ok, assign(socket, declared: Probe.declared())}
+  def mount(_params, _session, socket),
+    do: {:ok, assign(socket, declared: Probe.declared(), renders: 0)}
+
+  # Changes an assign, so LiveView renders the view again.
+  def handle_event("rerender", _params, socket),
+    do:
+      {:noreply, assign(socket, declared: Probe.declared(), renders: socket.assigns.renders + 1)}
 
   def render(assigns) do
     ~H"""
     <p id="parent-declared">{inspect(@declared)}</p>
+    <p id="renders">{@renders}</p>
     {live_render(@socket, Mutare.Phoenix.Ecto.Test.ChildLive, id: "child")}
     """
   end
@@ -61,6 +88,64 @@ defmodule Mutare.Phoenix.Ecto.Test.ChildLive do
   end
 end
 
+defmodule Mutare.Phoenix.Ecto.Test.ParamsLive do
+  @moduledoc false
+  # No `mount/3`, so LiveView emits no mount event.
+  use Phoenix.LiveView
+
+  alias Mutare.Phoenix.Ecto.Test.Probe
+
+  def handle_params(_params, _uri, socket),
+    do: {:noreply, assign(socket, declared: Probe.declared())}
+
+  def render(assigns) do
+    ~H"""
+    <p id="declared">{inspect(@declared)}</p>
+    """
+  end
+end
+
+defmodule Mutare.Phoenix.Ecto.Test.RenderLive do
+  @moduledoc false
+  # Neither `mount/3` nor `handle_params/3`: render is the only event.
+  use Phoenix.LiveView
+
+  alias Mutare.Phoenix.Ecto.Test.Probe
+
+  def render(assigns) do
+    ~H"""
+    <p id="declared">{inspect(Probe.declared())}</p>
+    """
+  end
+end
+
+defmodule Mutare.Phoenix.Ecto.Test.ProbeChannel do
+  @moduledoc false
+  # Replies with what the channel process had declared, during `join/3` and at each message.
+  use Phoenix.Channel
+
+  alias Mutare.Phoenix.Ecto.Test.Probe
+
+  def join("probe", _payload, socket), do: {:ok, %{declared: Probe.declared()}, socket}
+
+  def handle_in("declared", _payload, socket),
+    do: {:reply, {:ok, %{declared: Probe.declared()}}, socket}
+end
+
+defmodule Mutare.Phoenix.Ecto.Test.ProbeSocket do
+  @moduledoc false
+  # Keeps the header where phoenix_ecto's channel setup does. `Phoenix.ChannelTest` connects to it
+  # directly, so the endpoint mounts no route to it.
+  use Phoenix.Socket
+
+  channel "probe", Mutare.Phoenix.Ecto.Test.ProbeChannel
+
+  def connect(_params, socket, connect_info),
+    do: {:ok, assign(socket, :phoenix_ecto_sandbox, connect_info.user_agent)}
+
+  def id(_socket), do: nil
+end
+
 defmodule Mutare.Phoenix.Ecto.Test.Router do
   @moduledoc false
   use Phoenix.Router
@@ -74,6 +159,8 @@ defmodule Mutare.Phoenix.Ecto.Test.Router do
     pipe_through :browser
     get "/probe", Mutare.Phoenix.Ecto.Test.ProbePlug, []
     live "/live", Mutare.Phoenix.Ecto.Test.ParentLive
+    live "/params", Mutare.Phoenix.Ecto.Test.ParamsLive
+    live "/render", Mutare.Phoenix.Ecto.Test.RenderLive
   end
 end
 

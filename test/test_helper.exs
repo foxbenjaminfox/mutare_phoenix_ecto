@@ -18,6 +18,7 @@ Application.put_env(:mutare_phoenix_ecto, Endpoint,
   server: true,
   secret_key_base: String.duplicate("mutare-phoenix-ecto", 4),
   live_view: [signing_salt: "mutare-phoenix-ecto"],
+  pubsub_server: Mutare.Phoenix.Ecto.Test.PubSub,
   check_origin: false
 )
 
@@ -26,6 +27,7 @@ Logger.configure(level: :warning)
 
 {:ok, _} = Repo.start_link()
 Ecto.Adapters.SQL.Sandbox.mode(Repo, :manual)
+{:ok, _} = Phoenix.PubSub.Supervisor.start_link(name: Mutare.Phoenix.Ecto.Test.PubSub)
 {:ok, _} = Endpoint.start_link()
 
 # What Mutare's coverage probe does after the project's own helper.

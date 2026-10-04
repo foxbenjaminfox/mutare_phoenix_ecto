@@ -5,10 +5,9 @@ defmodule Mutare.Phoenix.EctoTest do
 
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
+  import Mutare.Phoenix.Ecto.Test.Owners
 
-  alias Ecto.Adapters.SQL.Sandbox, as: SQLSandbox
-  alias Mutare.Phoenix.Ecto.Test.{Endpoint, Repo}
-  alias Phoenix.Ecto.SQL.Sandbox, as: SandboxPlug
+  alias Mutare.Phoenix.Ecto.Test.Endpoint
 
   @endpoint Endpoint
 
@@ -72,6 +71,37 @@ defmodule Mutare.Phoenix.EctoTest do
                escaped(view.pid)
     end
 
+    test "rendered again after connecting stays attributed and leaves every handler attached" do
+      # LiveView drops `connect_info` once the first render is done; a later render event that
+      # read it would raise, and `:telemetry` detaches a handler that raises.
+      owner = owner()
+
+      conn = Plug.Conn.put_req_header(build_conn(), "user-agent", metadata(owner))
+      {:ok, view, _html} = live(conn, "/live")
+
+      assert render_click(view, "rerender") =~ ~s(<p id="renders">1</p>)
+      assert view |> element("#parent-declared") |> render() =~ escaped(owner)
+      assert handler_ids() == expected_handler_ids()
+    end
+
+    test "without mount/3 is attributed from handle_params/3 on" do
+      owner = owner()
+
+      conn = Plug.Conn.put_req_header(build_conn(), "user-agent", metadata(owner))
+      {:ok, view, _html} = live(conn, "/params")
+
+      assert view |> element("#declared") |> render() =~ escaped(owner)
+    end
+
+    test "without mount/3 or handle_params/3 is attributed from render/1 on" do
+      owner = owner()
+
+      conn = Plug.Conn.put_req_header(build_conn(), "user-agent", metadata(owner))
+      {:ok, view, _html} = live(conn, "/render")
+
+      assert view |> element("#declared") |> render() =~ escaped(owner)
+    end
+
     test "rendered dead with a nested LiveView leaves every handler attached" do
       # The nested LiveView's dead render has no `connect_info`; reading it would raise, and
       # `:telemetry` detaches a handler that raises.
@@ -85,6 +115,17 @@ defmodule Mutare.Phoenix.EctoTest do
       assert conn.status == 200
       assert handler_ids() == expected_handler_ids()
     end
+
+    test "rendered dead keeps the request's attribution, not the owner its connect_info names" do
+      # A dead render's `connect_info` is the request, whose `x-` headers a connected LiveView
+      # would read; the sandbox plug reads only the user agent, so it found no owner here.
+      conn =
+        build_conn()
+        |> Plug.Conn.put_req_header("x-sandbox", metadata(owner()))
+        |> get("/live")
+
+      assert html_response(conn, 200) =~ ~s(<p id="parent-declared">nil</p>)
+    end
   end
 
   describe "attach_attribution/1" do
@@ -94,18 +135,8 @@ defmodule Mutare.Phoenix.EctoTest do
     end
   end
 
-  # A sandbox owner of the shape a browser-driven test starts, stopped when the test exits.
-  defp owner do
-    owner = Task.async(fn -> SQLSandbox.start_owner!(Repo) end) |> Task.await()
-    on_exit(fn -> SQLSandbox.stop_owner(owner) end)
-    owner
-  end
-
   defp escaped(term),
     do: term |> inspect() |> Phoenix.HTML.html_escape() |> Phoenix.HTML.safe_to_string()
-
-  defp metadata(owner),
-    do: Repo |> SandboxPlug.metadata_for(owner) |> SandboxPlug.encode_metadata()
 
   # Each user agent's request in turn over one keep-alive connection, decoded to what the probe
   # route replied. `:httpc` reuses a session for sequential requests; the replies' `pid`s show
@@ -139,7 +170,10 @@ defmodule Mutare.Phoenix.EctoTest do
       {Mutare.Phoenix.Ecto, :server_request},
       {Mutare.Phoenix.Ecto, :phoenix_request},
       {Mutare.Phoenix.Ecto, :phoenix_request},
-      {Mutare.Phoenix.Ecto, :live_view_mount}
+      {Mutare.Phoenix.Ecto, :channel_join},
+      {Mutare.Phoenix.Ecto, :live_view},
+      {Mutare.Phoenix.Ecto, :live_view},
+      {Mutare.Phoenix.Ecto, :live_view}
     ])
   end
 end

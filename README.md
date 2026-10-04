@@ -43,24 +43,33 @@ and list it under `:extensions` in `.mutare.exs`:
 [extensions: [Mutare.Phoenix.Ecto]]
 ```
 
-That is all. The endpoint, router and LiveViews stay as phoenix_ecto's setup has them:
-its plug at the top of the endpoint, and, for LiveView, the socket passing the user agent
-(or the `x-` header the plug reads) in its `connect_info`. Mutare attaches this package's
-`:telemetry` handlers in its coverage run only, so a plain `mix test` runs none of it.
+That is all. The endpoint, router, LiveViews and channels stay as phoenix_ecto's setup
+has them: its plug at the top of the endpoint; for LiveView, the socket passing the user
+agent (or the `x-` header the plug reads) in its `connect_info`; for channels, the
+socket's `connect/3` keeping that header in `socket.assigns.phoenix_ecto_sandbox`.
+Mutare attaches this package's `:telemetry` handlers in its coverage run only, so a
+plain `mix test` runs none of it.
 
 ## What it covers, and what it doesn't
 
-- **Requests and LiveViews carrying sandbox metadata.** Each is attributed to the test
-  whose owner the metadata names, while that test is running. A process that serves
-  several requests in turn (a keep-alive connection) is attributed to each request's
-  test in turn, and to no test during a request that carries no metadata. Tasks they
-  start follow them.
+- **Requests, LiveViews and channels carrying sandbox metadata.** Each is attributed to
+  the test whose owner the metadata names, while that test is running. A process that
+  serves several requests in turn (a keep-alive connection) is attributed to each
+  request's test in turn, and to no test during a request that carries no metadata.
+  Tasks they start follow them.
 - **Shared sandbox mode.** A test in shared mode sends no metadata, so its requests are
   attributed to no test, and their mutants still run the whole suite. That is slow but
   correct: attributing them to whichever test holds the shared connection would also
   claim the work of background processes that happen to run then.
-- **Channels.** No event fires in a channel process before `join/3`, so the lines a join
-  runs stay attributed to no test.
+- **Endpoint plugs ahead of `Plug.Telemetry`.** They run before any event that names the
+  owner, so their lines stay attributed to no test.
+- **Socket connects and channel joins.** A socket's `connect/3` and `id/1` run in the
+  connection's process, which the endpoint hands to the socket ahead of its plugs, so no
+  event there names the owner; this holds for LiveView's socket too. No event fires in a
+  channel process before `join/3` either. So the lines `connect/3`, `id/1` and `join/3`
+  run stay attributed to no test. The callbacks after `join/3` are attributed to the
+  owner, provided the socket keeps the header in `socket.assigns.phoenix_ecto_sandbox`,
+  as phoenix_ecto's channel setup does.
 - **Processes the request only calls.** A `GenServer` the request calls runs in its own
   process, which no metadata reaches, so its lines stay attributed to no test, as they
   would in a test that calls it directly.
@@ -69,15 +78,20 @@ its plug at the top of the endpoint, and, for LiveView, the socket passing the u
 
 Mutare calls `Mutare.Phoenix.Ecto.attach_attribution/1` in its coverage run, after the
 project's test helper. It attaches handlers to events Phoenix, LiveView and Bandit emit
-in the process doing the work, before the application's code there runs:
+in the process doing the work, each before the application code that event precedes:
 
 - `[:phoenix, :endpoint, :start]` and `[:phoenix, :router_dispatch, :start]` decode the
   header phoenix_ecto's plug read (it keeps it in `conn.assigns.phoenix_ecto_sandbox`)
   and declare its owner, or withdraw the previous request's for a request without one.
 - `[:bandit, :request, :start]` withdraws the declaration before the endpoint runs, for
   a connection configured with `clear_process_dict: false`.
-- `[:phoenix, :live_view, :mount, :start]` declares the owner a connected LiveView's
-  `connect_info` names, or, for a nested LiveView with none, its parent.
+- `[:phoenix, :live_view, :mount, :start]`, `[:phoenix, :live_view, :handle_params, :start]`
+  and `[:phoenix, :live_view, :render, :start]`, whichever a connected LiveView emits
+  first, declare the owner its `connect_info` names, or, for a nested LiveView with none,
+  its parent. (LiveView emits the mount event only for a view that defines `mount/3` or
+  has `on_mount` hooks.)
+- `[:phoenix, :channel_joined]` declares the owner whose header the socket's `connect/3`
+  kept in `socket.assigns.phoenix_ecto_sandbox`, once `join/3` returns.
 
 The declaration is
 [`Mutare.CoverageAttribution.attribute_to/1`](https://hexdocs.pm/mutare/Mutare.CoverageAttribution.html#attribute_to/1).

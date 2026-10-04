@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Channels: `[:phoenix, :channel_joined]` attributes a channel process to the owner
+  whose header the socket's `connect/3` kept in `socket.assigns.phoenix_ecto_sandbox`,
+  as phoenix_ecto's channel setup does, so the callbacks after `join/3` are attributed.
+
+### Fixed
+
+- A connected LiveView that defines no `mount/3` and has no `on_mount` hooks, for which
+  LiveView emits no mount event, is now attributed from its first `handle_params/3` or
+  render.
+
 ## [0.1.0] - 2026-10-03
 
 Initial release.
