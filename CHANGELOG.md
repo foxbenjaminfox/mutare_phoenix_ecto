@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-10-04
+
 ### Added
 
 - Channels: `[:phoenix, :channel_joined]` attributes a channel process to the owner
@@ -31,5 +33,6 @@ Initial release.
   runs those tests instead of the whole suite. It reads Phoenix, LiveView and Bandit
   telemetry, so the endpoint and LiveViews need no change.
 
-[Unreleased]: https://github.com/foxbenjaminfox/mutare_phoenix_ecto/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/foxbenjaminfox/mutare_phoenix_ecto/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/foxbenjaminfox/mutare_phoenix_ecto/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/foxbenjaminfox/mutare_phoenix_ecto/releases/tag/v0.1.0
